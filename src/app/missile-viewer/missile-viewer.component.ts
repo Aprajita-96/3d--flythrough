@@ -35,8 +35,6 @@ export class MissileViewerComponent implements AfterViewInit {
 
   cameraMode: 'STATIC' | 'CHASE' = 'CHASE';
 
-  /* ================= INIT ================= */
-
   ngAfterViewInit(): void {
     this.initScene();
     this.loadTrajectory();
@@ -44,7 +42,6 @@ export class MissileViewerComponent implements AfterViewInit {
   }
 
   /* ================= CAMERA MODE ================= */
-
   @HostListener('window:keydown', ['$event'])
   onKey(e: KeyboardEvent) {
     if (e.key.toLowerCase() === 'c') {
@@ -53,7 +50,6 @@ export class MissileViewerComponent implements AfterViewInit {
   }
 
   /* ================= SCENE ================= */
-
   initScene(): void {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
@@ -83,7 +79,6 @@ export class MissileViewerComponent implements AfterViewInit {
   }
 
   /* ================= STARS ================= */
-
   createStars() {
     const geo = new THREE.BufferGeometry();
     const pts: number[] = [];
@@ -103,8 +98,7 @@ export class MissileViewerComponent implements AfterViewInit {
     );
   }
 
-  /* ================= EARTH ================= */
-
+  /* ================= EARTH & GRID ================= */
   createEarth() {
     const geo = new THREE.SphereGeometry(1, 64, 64);
     const tex = new THREE.TextureLoader().load('assets/earth/earth.jpg');
@@ -126,21 +120,17 @@ export class MissileViewerComponent implements AfterViewInit {
     this.scene.add(new THREE.Mesh(geo, mat));
   }
 
-  /* ================= MISSILE LOADING ================= */
-
+  /* ================= MISSILE ================= */
   loadMissile() {
     const mtlLoader = new MTLLoader();
     mtlLoader.setPath('assets/models/');
-
     mtlLoader.load(
       'missile.mtl',
       materials => {
         materials.preload();
-
         const objLoader = new OBJLoader();
         objLoader.setMaterials(materials);
         objLoader.setPath('assets/models/');
-
         objLoader.load(
           'missile.obj',
           obj => this.prepareMissile(obj),
@@ -167,31 +157,32 @@ export class MissileViewerComponent implements AfterViewInit {
   prepareMissile(object: THREE.Object3D) {
     this.missile = object;
 
+    // TS2339 fix
     this.missile.traverse(child => {
       if ((child as any).isMesh) {
-        const m = child as THREE.Mesh;
-        (m.material as any).side = THREE.DoubleSide;
+        const mesh = child as THREE.Mesh;
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach(mat => (mat.side = THREE.DoubleSide));
+        } else {
+          mesh.material.side = THREE.DoubleSide;
+        }
       }
     });
 
-    // OBJ normalization
+    // Scale & orientation
     this.missile.scale.setScalar(0.01);
-    this.missile.rotation.set(Math.PI / 2, 0, 0);
+    this.missile.rotation.set(0, 0, 0); // reset
+    this.missile.rotateX(Math.PI / 2);   // tip along +Z
 
     this.scene.add(this.missile);
     this.createExhaust();
-
-    if (this.path.length) {
-      this.missile.position.copy(this.path[0]);
-    }
-
-    console.log('MISSILE LOADED');
   }
 
   createFallbackMissile() {
     const geo = new THREE.ConeGeometry(0.06, 0.18, 24);
     const mat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
     this.missile = new THREE.Mesh(geo, mat);
+    this.missile.rotation.set(0, 0, 0);
     this.missile.rotateX(Math.PI / 2);
     this.scene.add(this.missile);
     this.createExhaust();
@@ -202,15 +193,18 @@ export class MissileViewerComponent implements AfterViewInit {
     const mat = new THREE.MeshBasicMaterial({
       color: 0xffaa00,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.7
     });
     this.exhaust = new THREE.Mesh(geo, mat);
-    this.exhaust.rotateX(-Math.PI / 2);
-    this.scene.add(this.exhaust);
+
+    // Local position relative to missile tip
+    this.exhaust.position.set(0, 0, -0.15);
+    this.exhaust.rotation.x = Math.PI;
+
+    this.missile.add(this.exhaust);
   }
 
   /* ================= TRAJECTORY ================= */
-
   loadTrajectory() {
     fetch('assets/path/trajectory.json')
       .then(r => r.json())
@@ -232,7 +226,7 @@ export class MissileViewerComponent implements AfterViewInit {
         );
         this.scene.add(line);
 
-        if (this.missile) {
+        if (this.path.length && this.missile) {
           this.missile.position.copy(this.path[0]);
         }
       });
@@ -249,7 +243,6 @@ export class MissileViewerComponent implements AfterViewInit {
   }
 
   /* ================= IMPACT ================= */
-
   createImpactFlash(pos: THREE.Vector3) {
     const geo = new THREE.SphereGeometry(0.05, 16, 16);
     const mat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
@@ -269,7 +262,6 @@ export class MissileViewerComponent implements AfterViewInit {
   }
 
   /* ================= ANIMATION ================= */
-
   animate = () => {
     requestAnimationFrame(this.animate);
 
@@ -289,12 +281,18 @@ export class MissileViewerComponent implements AfterViewInit {
       }
 
       const pos = start.clone().lerp(end, this.segmentProgress);
+
+      // Move missile along path
       this.missile.position.copy(pos);
+
+      // Orient missile along path
       this.missile.lookAt(end);
 
+      // Exhaust local
       this.exhaust.position.copy(pos);
       this.exhaust.lookAt(start);
 
+      // Camera
       if (this.cameraMode === 'CHASE') {
         const dir = end.clone().sub(pos).normalize();
         const camPos = pos.clone()
